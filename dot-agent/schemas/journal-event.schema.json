@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "journal-event.schema.json",
+  "title": "Journal event (one JSONL line)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event", "task_id", "attempt", "timestamp", "task_version", "idempotency_key", "references", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "minLength": 1, "maxLength": 60 },
+    "seq": { "type": "integer", "minimum": 1 },
+    "event": {
+      "type": "string",
+      "enum": [
+        "task_created",
+        "step_started",
+        "artifact_written",
+        "verification_started",
+        "verification_finished",
+        "decision_recorded",
+        "step_committed",
+        "step_failed",
+        "task_blocked",
+        "task_completed",
+        "checkpoint_created",
+        "recovery_performed"
+      ]
+    },
+    "task_id": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "step_id": { "type": ["string", "null"], "maxLength": 80 },
+    "attempt": { "type": "integer", "minimum": 0 },
+    "timestamp": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "task_version": { "type": "integer", "minimum": 0 },
+    "idempotency_key": { "type": "string", "maxLength": 120 },
+    "references": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 200 } },
+    "payload": { "type": "object" }
+  }
+}

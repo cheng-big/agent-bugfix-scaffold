@@ -1,0 +1,353 @@
+{
+  "process_version": 1,
+  "name": "Bug 修复全流程",
+  "phases": [
+    {
+      "id": "orient",
+      "no": "00",
+      "icon": "🗺",
+      "name": "系统测绘",
+      "intent": "修 bug 前先给目标系统建架构图谱，作为精确定位的地基",
+      "what": "repo-map 扫出骨架（页面/路由/模块依赖/云函数清单），AI 读源码做语义标注，产出可复用的架构图谱；同时登记静态扫描看不到的已知盲区",
+      "why": "凭记忆定位=定错位；先测绘、读真源，才有精确定位的基础。测绘负责'缩小到哪条链'，动态证据负责'钉到哪一行'",
+      "skills": ["agent-skills:debugging-and-error-recovery"],
+      "inputs": [
+        {
+          "key": "repo",
+          "name": "目标代码库",
+          "desc": "被修系统的源码根目录——安装后改成本项目真实路径",
+          "path": "."
+        }
+      ],
+      "depends_on": [],
+      "gates": [
+        "充分性自检门：须逐条 bug 答出『涉及哪条调用链？数据从哪来经过谁到哪去？』——答不出即测绘缺口，标出补 / 熔断问人，禁止硬着头皮改",
+        "登记已知盲区（动态/反射调用·跨端云边界·配置驱动分支·数据形状），指明各自在后续哪个阶段补"
+      ],
+      "dod": ["架构图谱可回读，涉及面的调用链+数据流答得出"],
+      "artifacts": [
+        {
+          "key": "arch-map",
+          "name": "架构图谱",
+          "desc": "页面/路由清单 + 模块依赖 + 云函数/服务清单 + 语义标注 + 已知盲区",
+          "path": ".agent/arch-map.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "intake",
+      "no": "01",
+      "icon": "📥",
+      "name": "录入台账",
+      "intent": "把在线/离线 Excel·Word 的 bug 清单归一化成结构化台账",
+      "what": "离线 xlsx/docx 用 `bug import` 解析；在线文档先用 web-access 抓成表或导出本地，再 import；统一成 bugs.json（每条含 id/现象/复现/期望/严重级/涉及端）",
+      "why": "脚手架要知道在修哪个 bug；结构化台账是逐条驱动、可追踪、可回归的前提",
+      "skills": ["web-access"],
+      "inputs": [
+        {
+          "key": "bug-inbox",
+          "name": "Bug 清单",
+          "desc": "在线/离线 Excel 或 Word 的原始 bug 清单——安装后改成真实路径",
+          "path": "bugs.inbox.xlsx"
+        }
+      ],
+      "depends_on": ["orient"],
+      "gates": ["每条 bug 有唯一 id、现象、复现步骤、期望行为、严重级、涉及端（web/小程序/云函数）"],
+      "dod": ["bugs.json 生成且逐条字段齐全"],
+      "artifacts": [
+        {
+          "key": "bugs",
+          "name": "Bug 台账",
+          "desc": "归一化的结构化 bug 清单（bug import 生成）",
+          "path": ".agent/bugs.json",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "reproduce",
+      "no": "02",
+      "icon": "🔁",
+      "name": "稳定复现",
+      "intent": "逐条稳定复现，产出根因定位要用的运行时证据",
+      "what": "按台账逐条复现，记录环境/命中率，抓运行时证据：报错栈、日志、真实数据样本、探针点击路径",
+      "why": "无法稳定复现的 bug，根因分析就是猜；动态证据是把定位从'哪条链'收敛到'哪一行'的关键输入",
+      "skills": ["agent-skills:debugging-and-error-recovery"],
+      "inputs": [
+        {
+          "key": "bugs",
+          "name": "Bug 台账",
+          "desc": "上一阶段的 bugs.json",
+          "path": ".agent/bugs.json"
+        }
+      ],
+      "depends_on": ["intake"],
+      "gates": ["复现不了的 bug 挂起标记，禁止在没复现的情况下猜根因"],
+      "dod": ["逐条 bug 有稳定复现步骤 + 运行时证据（栈/日志/数据样本）"],
+      "artifacts": [
+        {
+          "key": "repro",
+          "name": "复现证据",
+          "desc": "逐条 bug 的复现步骤 + 报错栈/日志/真实数据样本",
+          "path": ".agent/bugs/<bug>/repro.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "root-cause",
+      "no": "03",
+      "icon": "🔬",
+      "name": "根因定位",
+      "intent": "静态调用链 ∩ 动态证据，定位到文件:行 + 为什么会发生",
+      "what": "从台账涉及页面反查调用链（页面→wxml/模板→util/service→云函数），只深读相关文件；结合复现证据把范围钉到具体位置，区分表象与根因",
+      "why": "根因≠改了哪行；只有定位到'为什么会发生'才能一次修对，否则治标不治本反复发",
+      "skills": ["agent-skills:debugging-and-error-recovery"],
+      "inputs": [
+        {
+          "key": "arch-map",
+          "name": "架构图谱",
+          "desc": "orient 阶段产出",
+          "path": ".agent/arch-map.md"
+        }
+      ],
+      "depends_on": ["reproduce"],
+      "gates": [
+        "根因必须落到 文件:行 + 触发条件；定不下来回退补测绘 / 熔断问人，不硬猜",
+        "区分表象 vs 根因，不把'改了哪行'当成根因"
+      ],
+      "dod": ["逐条 bug 有确证根因（文件:行 + 为什么）"],
+      "artifacts": [
+        {
+          "key": "root-cause",
+          "name": "根因分析",
+          "desc": "表象/根因分离 + 定位到文件:行 + 触发条件",
+          "path": ".agent/bugs/<bug>/root-cause.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "impact",
+      "no": "04",
+      "icon": "💥",
+      "name": "影响面分析",
+      "intent": "blast radius：谁共用这段、改了会波及什么、列出回归清单",
+      "what": "沿架构图谱查该根因点还有谁调用/共用；评估改动波及面；产出回归清单（改完 verify 阶段必须逐条不破）",
+      "why": "改 A 弄坏 B 是修 bug 最常见的次生灾害；先把回归面显性化，才能在 verify 阶段守住回归门",
+      "skills": [],
+      "inputs": [
+        {
+          "key": "root-cause",
+          "name": "根因分析",
+          "desc": "上一阶段产出",
+          "path": ".agent/bugs/<bug>/root-cause.md"
+        }
+      ],
+      "depends_on": ["root-cause"],
+      "gates": ["回归清单必须列全（谁共用根因点、改动波及哪些页面/接口）"],
+      "dod": ["逐条 bug 有影响面 + 回归清单"],
+      "artifacts": [
+        {
+          "key": "impact",
+          "name": "影响面",
+          "desc": "共用方/波及面 + 回归清单",
+          "path": ".agent/bugs/<bug>/impact.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "fix-plan",
+      "no": "05",
+      "icon": "🛠",
+      "name": "修复方案·确认门",
+      "intent": "定最小外科式方案 + 测试计划；这里 STOP 等人工确认才放行改码",
+      "what": "给最小改动方案；多方案时显式择一并写理由（不默认第一个）；同时定'怎么测/验收标准'。产物出来后停住，等确认",
+      "why": "这是你要的'我确认后再改'的硬卡点；方案没过目就动代码=失控。规则七：冲突显式择一不折中",
+      "skills": [],
+      "inputs": [
+        {
+          "key": "impact",
+          "name": "影响面",
+          "desc": "上一阶段产出",
+          "path": ".agent/bugs/<bug>/impact.md"
+        }
+      ],
+      "depends_on": ["impact"],
+      "gates": [
+        "★确认门：方案 + 测试计划产出后 STOP，等人工确认，未确认禁止进入 fix",
+        "多方案显式择一 + 写明理由，禁止默默取第一个"
+      ],
+      "dod": ["修复方案 + 测试计划已产出并经人工确认"],
+      "artifacts": [
+        {
+          "key": "fix-plan",
+          "name": "修复方案",
+          "desc": "最小外科式方案（择一+理由）+ 测试计划 + 验收标准",
+          "path": ".agent/bugs/<bug>/fix-plan.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "fix",
+      "no": "06",
+      "icon": "🩹",
+      "name": "执行修复",
+      "intent": "只改必要处，贴项目风格；改前打基线保证可回滚",
+      "what": "按已确认方案改码，改动前打 git 基线/开分支（安全网），只动必要行，不顺手重构邻近代码",
+      "why": "外科式修改把风险面压到最小；git 基线让 verify 失败时能一键回滚重来",
+      "skills": [],
+      "inputs": [
+        {
+          "key": "fix-plan",
+          "name": "修复方案",
+          "desc": "已确认的方案",
+          "path": ".agent/bugs/<bug>/fix-plan.md"
+        }
+      ],
+      "depends_on": ["fix-plan"],
+      "gates": [
+        "改动前打 git 基线/开分支（可一键回滚）",
+        "只改必要处，贴项目既有风格，不顺手重构相邻代码"
+      ],
+      "dod": ["按方案完成改动 + 改动清单成账"],
+      "artifacts": [
+        {
+          "key": "change",
+          "name": "改动清单",
+          "desc": "本次改了哪些文件/行 + 对应根因",
+          "path": ".agent/bugs/<bug>/change.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "reconcile",
+      "no": "07",
+      "icon": "🧮",
+      "name": "影响面复核",
+      "intent": "改后 diff 对账：实际改动 vs 04/05 预测的影响面，防「改多了 / 波及没预料的模块」",
+      "what": "跑 `impact-check --bug <id>` 从 git diff 客观抽实际改动 + 符号级反向查调用方，与 impact.md/fix-plan.md 交叉核对，产出对账清单：计划外改动、未覆盖波及各自红字列出",
+      "why": "04 影响面是改前的主观预测、06 change.md 是手写自述；唯一客观事实源 git diff 必须被机器核对一遍，否则「改多了」「波及了 B」溜过验证也发现不了",
+      "skills": [],
+      "inputs": [
+        {
+          "key": "change",
+          "name": "改动清单",
+          "desc": "fix 阶段产出，据此定位本次 bug 目录",
+          "path": ".agent/bugs/<bug>/change.md"
+        }
+      ],
+      "depends_on": ["fix"],
+      "gates": [
+        "跑 `impact-check --bug <id>` 出对账清单，逐条核对：计划外改动必须确认必要否则撤除（外科式修改）；反向依赖波及必须补进 impact 回归清单否则说明为何无需",
+        "符号级反向依赖是启发式，动态/反射/跨端调用抓不到 → 明确交 08 verify 兜底，禁止据「没查到调用方」判定『无影响』"
+      ],
+      "dod": ["impact-check.md 已产出，第二/三节逐条有结论（越界已处置、波及已覆盖或说明）"],
+      "artifacts": [
+        {
+          "key": "impact-check",
+          "name": "影响面对账清单",
+          "desc": "实际改动(客观) + 计划外改动 + 反向依赖波及 + 逐条核对结论",
+          "path": ".agent/bugs/<bug>/impact-check.md",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "no": "08",
+      "icon": "✅",
+      "name": "双轨验证",
+      "intent": "真跑复现路径 + 回归清单，截图回填；FAIL 则回退重试",
+      "what": "按产物类型分流：web/html 走浏览器探针跑复现路径截图；小程序/云函数走微信开发者工具截图或单测/日志断言。PASS=复现通过且回归清单不破",
+      "why": "编译过≠跑得通、返回200≠功能做实；判 UI 能不能跑唯一权威是真去点。FAIL 是回 root-cause 重来的信号，不是终点",
+      "skills": ["flow-probe", "agent-skills:browser-testing-with-devtools"],
+      "inputs": [
+        {
+          "key": "change",
+          "name": "改动清单",
+          "desc": "fix 阶段产出",
+          "path": ".agent/bugs/<bug>/change.md"
+        }
+      ],
+      "depends_on": ["reconcile"],
+      "gates": [
+        "PASS 前须先过 07 影响面复核：impact-check.md 无未决的计划外改动/未覆盖波及（或已逐条说明）",
+        "真跑真截图，禁假绿；PASS 标准=本 bug 复现路径通过 且 impact 回归清单逐条不破",
+        "FAIL → 回退闭环：loop back 到 root-cause，attempt+1 并记上次失败原因，别再撞同一堵墙",
+        "attempt 到上限（默认 3）仍 FAIL 或根因定不下来 → 熔断升级，停下求助人，不无限烧 token"
+      ],
+      "dod": ["复现路径 PASS + 回归清单不破 + 证据截图已产出"],
+      "artifacts": [
+        {
+          "key": "evidence",
+          "name": "验证证据",
+          "desc": "复现路径 + 回归的 PASS/FAIL 截图与结论",
+          "path": ".agent/bugs/<bug>/evidence",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "report",
+      "no": "09",
+      "icon": "📄",
+      "name": "报告归档",
+      "intent": "出 HTML 报告 + 根因沉淀记忆层防复发",
+      "what": "生成单 bug/汇总 HTML 报告：现象→根因→影响→改动→前后对比截图；把根因规律沉淀进记忆层，避免同类复发",
+      "why": "报告让人一眼看清'为什么坏、怎么修的、证据在哪'；根因沉淀是防复发的长期资产",
+      "skills": [],
+      "inputs": [
+        {
+          "key": "evidence",
+          "name": "验证证据",
+          "desc": "verify 阶段截图与结论",
+          "path": ".agent/bugs/<bug>/evidence"
+        }
+      ],
+      "depends_on": ["verify"],
+      "gates": ["报告可点、截图已嵌；根因规律已写入记忆层"],
+      "dod": ["单 bug/汇总报告 HTML 生成，证据齐备"],
+      "artifacts": [
+        {
+          "key": "report",
+          "name": "Bug 报告",
+          "desc": "现象→根因→影响→改动→前后对比截图的 HTML 报告",
+          "path": ".agent/reports/index.html",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "rails": [
+    {
+      "id": "memory",
+      "name": "记得住 · 任务记忆",
+      "desc": "防遗忘/防中断；最终事实=代码/Git/测试/真实系统状态与截图，不是聊天记录"
+    },
+    {
+      "id": "no-guess",
+      "name": "不猜根因 · 定位纪律",
+      "desc": "定位靠扫描骨架 + 读真源 + 运行时证据；定不下来回退补测绘或熔断问人，禁止凭记忆猜"
+    },
+    {
+      "id": "no-fake-green",
+      "name": "不假绿 · 验证纪律",
+      "desc": "验证靠真跑真截图；PASS=复现路径通过且回归清单不破，返回200/看着没报错不算数"
+    },
+    {
+      "id": "surgical",
+      "name": "外科式修改",
+      "desc": "只改必要处，贴项目既有风格，不顺手重构相邻代码或改排版"
+    },
+    {
+      "id": "safety-net",
+      "name": "harness 安全网",
+      "desc": "修前打基线可回滚 · verify FAIL 回退重试并记因 · 试满上限仍 FAIL 熔断升级求助 · 回归门守住不弄坏 B"
+    }
+  ]
+}

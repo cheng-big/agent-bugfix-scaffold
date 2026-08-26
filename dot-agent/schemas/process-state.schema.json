@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "process-state.schema.json",
+  "title": "Process runtime state（流程运行时状态）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["process_version", "current_phase", "phase_tasks", "artifacts", "updated_at"],
+  "properties": {
+    "process_version": { "type": "integer", "minimum": 1 },
+    "current_phase": { "type": ["string", "null"], "maxLength": 60 },
+    "phase_tasks": { "type": "object" },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 400,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase_id", "key", "name", "path", "status", "registered_at"],
+        "properties": {
+          "phase_id": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "key": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "status": { "type": "string", "enum": ["draft", "done"] },
+          "registered_at": { "type": "string", "maxLength": 40 }
+        }
+      }
+    },
+    "systems": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "name", "tasks"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "tasks": {
+            "type": "array",
+            "maxItems": 40,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key", "status"],
+              "properties": {
+                "key": { "type": "string", "maxLength": 60 },
+                "status": { "type": "string", "enum": ["not_started", "planned", "in_progress", "verifying", "blocked", "completed", "cancelled"] },
+                "updated_at": { "type": "string", "maxLength": 40 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "updated_at": { "type": "string", "maxLength": 40 }
+  }
+}

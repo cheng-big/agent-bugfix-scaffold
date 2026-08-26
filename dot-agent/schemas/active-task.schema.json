@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "active-task.schema.json",
+  "title": "ACTIVE_TASK pointer",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["active_task_id", "updated_at"],
+  "properties": {
+    "active_task_id": { "type": ["string", "null"], "maxLength": 80, "pattern": "^[A-Za-z0-9._-]*$" },
+    "updated_at": { "type": "string", "maxLength": 40 }
+  }
+}

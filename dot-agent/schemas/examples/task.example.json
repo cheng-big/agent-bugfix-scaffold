@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "task_id": "demo-2026-08-16",
+  "objective": "示例任务：演示外部任务记忆与可恢复执行机制的完整生命周期",
+  "status": "in_progress",
+  "phase": "实现",
+  "current_focus": "把 start→work→verify→commit 时序跑通一遍",
+  "next_action": "运行 recover 确认无中断步骤后，起下一个步骤",
+  "blockers": [],
+  "critical_constraints": [
+    "TASK 快照 ≤16KB，历史进 journal/checkpoint",
+    "无 step_committed 的步骤不算完成"
+  ],
+  "recent_completed": [
+    { "at": "2026-08-16T10:00:00+08:00", "summary": "建 .agent 目录骨架", "step_id": "step-1", "evidence": ["ev:skeleton"] }
+  ],
+  "definition_of_done": [
+    { "text": "12 条测试全绿", "met": false, "evidence": [] },
+    { "text": "验收演示 1~10 步跑通", "met": false, "evidence": [] }
+  ],
+  "references": ["docs/BUILD-LEDGER.md", ".agent/README.md"],
+  "open_step": null,
+  "version": 3,
+  "created_at": "2026-08-16T09:55:00+08:00",
+  "updated_at": "2026-08-16T10:05:00+08:00"
+}

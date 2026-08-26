@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "task.schema.json",
+  "title": "TASK snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "objective",
+    "status",
+    "phase",
+    "current_focus",
+    "next_action",
+    "blockers",
+    "critical_constraints",
+    "recent_completed",
+    "definition_of_done",
+    "references",
+    "version",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "task_id": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[A-Za-z0-9._-]+$" },
+    "objective": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "status": { "type": "string", "enum": ["planned", "in_progress", "blocked", "verifying", "completed", "cancelled"] },
+    "phase": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "current_focus": { "type": "string", "maxLength": 500 },
+    "next_action": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "blockers": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "type": "string", "minLength": 1, "maxLength": 280 }
+    },
+    "critical_constraints": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "type": "string", "minLength": 1, "maxLength": 280 }
+    },
+    "recent_completed": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["at", "summary"],
+        "properties": {
+          "at": { "type": "string", "maxLength": 40 },
+          "summary": { "type": "string", "minLength": 1, "maxLength": 280 },
+          "step_id": { "type": "string", "maxLength": 80 },
+          "evidence": { "type": "array", "maxItems": 6, "items": { "type": "string", "maxLength": 120 } }
+        }
+      }
+    },
+    "definition_of_done": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "met"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 280 },
+          "met": { "type": "boolean" },
+          "evidence": { "type": "array", "maxItems": 6, "items": { "type": "string", "maxLength": 120 } }
+        }
+      }
+    },
+    "references": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+    },
+    "open_step": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["step_id", "intent", "attempt", "idempotency_key", "started_at"],
+      "properties": {
+        "step_id": { "type": "string", "maxLength": 80 },
+        "intent": { "type": "string", "maxLength": 280 },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "idempotency_key": { "type": "string", "maxLength": 120 },
+        "started_at": { "type": "string", "maxLength": 40 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "version": { "type": "integer", "minimum": 1 },
+    "created_at": { "type": "string", "maxLength": 40 },
+    "updated_at": { "type": "string", "maxLength": 40 }
+  }
+}
