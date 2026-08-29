@@ -3,7 +3,7 @@
 > 在「外部任务记忆」底座之上，加一层 **bug 修复方法论**：把「测绘系统 → 录入台账 → 复现 → 定位 → 影响面 → 方案(确认门) → 修 → 影响面复核 → 双轨验证 → 报告」写成可配置的 `process.json`，
 > 让 AI/你**被引导着、一步步、可自我纠错地**把 bug 从"现象"修到"验证通过"——而不是凭记忆瞎改、改完假绿。
 >
-> 复用 `agent-dev-scaffold` 的引擎（零依赖 CLI + 记忆层 + HTML 看板），只换方法论 + 补 4 个 bug 专属命令。
+> 复用 `agent-dev-scaffold` 的引擎（零依赖 CLI + 记忆层 + HTML 看板），保留 Bugfix 专属门禁，并加入反馈驱动的 Harness Evolver 外循环。
 
 本仓是**源模板**——`dot-agent/` 就是将来落到目标项目里的 `.agent/` 目录。不要在这里跑 install。
 完整设计（为什么这么做、harness 自检、边界盲区）见 [`DESIGN.md`](./DESIGN.md)。
@@ -32,6 +32,7 @@ repo-map [--root <目标代码库>]              # 扫页面/路由/依赖/云�
 impact-check --bug <id> [--base <ref>]      # 改后 diff 对账：实际改动×反向调用方 vs 04/05 预测 → .agent/bugs/<id>/impact-check.md（计划外改动/未覆盖波及红字列出 + AI 自查清单）
 bug import --file <bugs.xlsx|docx|csv|json> # 录入台账 → .agent/bugs.json（识别 现象/复现/期望/严重级/模块/页面/状态/提出人；自动过滤已验收/已完成）
 report [--out ..] [--open]                  # 台账+证据 → .agent/reports/index.html（统计概览 + 状态徽章 + 模块筛选）
+bug detect|add|update|close|evolve|list      # 自动捕获 → 证据归档 → 离线规则差异
 
 # 可选：bug 清单在需登录的在线文档（飞书/腾讯文档）时，借已登录 Chrome 标签抓文本，再喂 AI 归一化成 bugs.json
 python3 dot-agent/scripts/read_online_chrome.py "feishu.cn/wiki/xxx"
@@ -61,9 +62,12 @@ python3 dot-agent/scripts/read_online_chrome.py "feishu.cn/wiki/xxx"
 <summary>底层命令一览（AI 替你执行，列出仅供你了解发生了什么，不用自己敲）</summary>
 
 ```bash
-cp -r dot-agent <目标项目>/.agent && cd <目标项目>
+cp -r dot-agent <目标项目>/.agent
+cp -r harness_evolver <目标项目>/harness_evolver
+cd <目标项目>
 node .agent/scripts/agent.mjs install          # 装：建目录 / 生成 PROJECT.md·process.json / 追加 .gitignore
-node --test .agent/scripts/*.test.mjs           # 自测（应全绿，含 impact-check 对账用例）
+node --test .agent/scripts/*.test.mjs           # 自测（52/52）
+python3 -m unittest discover -s harness_evolver/tests -v  # Evolver（7/7）
 node .agent/scripts/agent.mjs process init      # 生成方法论定义
 node .agent/scripts/agent.mjs repo-map          # 00 建架构图谱骨架 → AI 补语义标注
 node .agent/scripts/agent.mjs bug import --file bugs.xlsx   # 01 录入台账
@@ -72,6 +76,12 @@ node .agent/scripts/agent.mjs impact-check --bug <id>      # 07 改后对账
 node .agent/scripts/agent.mjs board --open      # 进度看板
 node .agent/scripts/agent.mjs report --open     # bug 报告
 ```
+
+## 自迭代闭环
+
+新项目中，具体 Bug 关键词由 Agent 协议自动写入现有 `.agent/bugs.json`。修复通过后执行 `bug close <id>`，CLI 必须回读 `root-cause.md / impact.md / change.md / impact-check.md / evidence/`，齐全才生成 `docs/retrospective/已归档反馈.md` 并运行离线 Evolver。
+
+`report` 阶段完成前会阻断未归档 Bug、复盘不一致、Evolver pending 和缺失报告。`next/context/resume/phase start` 会按当前 Bugfix 阶段动态注入历史规则。显式关键词 `生成规则差异 / 项目复盘 / 进化脚手架` 触发 `bug evolve`。
 </details>
 
 ## 与另外两个脚手架的关系

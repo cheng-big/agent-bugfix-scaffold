@@ -12,6 +12,8 @@
 - 每执行完一步，命令末尾**直接提示下一步**；`next` 命令随时问「现在干啥」得到唯一答案。
 - 产物**真源是磁盘**：登记只是索引，`next/board/artifact list` 一律 `existsSync` 回读，缺失如实标 ✗。
 - 阶段绑定的 **skill 只是引导指针**（该调哪个 skill），脚手架不自动执行；看板标注 skill 是否已装。
+- 项目根存在 `harness_evolver/` 时，`next/context/resume/phase start` 会按 Bugfix 阶段注入历史防御规则；`reconcile` 保留原影响面对账门并归入 CODING 规则。
+- `report` 阶段 complete 会先检查 `.agent/bugs.json` 全部本轮 Bug 已归档/延后、复盘一致、Evolver 不 pending 且两类报告可回读。
 
 ## 引导闭环（照着做下一步）
 

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "phase_stage_map": {
+    "understand": "REQUIREMENT",
+    "reverse-design": "REQUIREMENT",
+    "page-contract": "REQUIREMENT",
+    "foundation": "CODING",
+    "build-systems": "CODING",
+    "verify": "TESTING",
+    "delivery": "TESTING",
+    "orient": "REQUIREMENT",
+    "intake": "REQUIREMENT",
+    "reproduce": "TESTING",
+    "root-cause": "CODING",
+    "impact": "REQUIREMENT",
+    "fix-plan": "CODING",
+    "fix": "CODING",
+    "reconcile": "CODING",
+    "report": "TESTING"
+  },
+  "worklist_stage_map": {
+    "db": "DATABASE",
+    "api": "CODING",
+    "backend": "CODING",
+    "frontend": "CODING",
+    "role": "REQUIREMENT",
+    "perm": "REQUIREMENT",
+    "test": "TESTING"
+  },
+  "database_target_hints": [
+    "migration",
+    "ddl",
+    "database",
+    "data-model",
+    "数据库",
+    "迁移"
+  ]
+}

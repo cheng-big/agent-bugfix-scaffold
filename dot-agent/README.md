@@ -40,6 +40,12 @@ dod set --index N [--met|--unmet] [--evidence ev:..]*
 checkpoint [--auto]
 recover [--reconcile <step> --evidence ev:..] [--fail <step> --reason ..]
 block --blocker ".." | complete | validate
+bug detect --text ".."
+bug add --source user|engineering --title .. [--actual ..] [--evidence ..]*
+bug update <id> [--verification-status ..] [--evidence ..]*
+bug close <id> [--status 已归档|延后] [--resolution ..]
+bug retrospective-import --file docs/retrospective/项目复盘待办.md
+bug evolve [--force] | bug list
 ```
 所有命令支持 `--json`（机读输出）。改状态的命令：校验输入 → 校验状态转换 → 原子写 → 写日志 → 失败非零退出。
 
@@ -106,3 +112,9 @@ hook install                # 装 git post-commit：每次提交后自动刷新 
 
 ## 后续 Agent 工作协议
 见 `AGENTS.md` / `CLAUDE.md` 的「任务记忆协议」节。
+
+## Bugfix Harness Evolver
+
+同级 `../harness_evolver/` 维护四阶段历史规则。自动捕获先进入 `.agent/bugs.json`；只有 `bug close` 通过根因、影响、改动、impact-check 和 evidence 回读后才写入 `docs/retrospective/feedback.jsonl` 与 `已归档反馈.md`，并自动运行离线 Evolver。
+
+`report` 阶段 `complete` 会检查所有 `in_scope` Bug 已归档/延后、演进状态不 pending、Evolver 报告和 Bug HTML 报告可回读。`FEEDBACK-PROTOCOL.md` 在每次 context/resume 中始终注入。

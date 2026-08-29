@@ -108,6 +108,9 @@ const SENSITIVE_VALUE = [
   /\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*/gi,
   /\beyJ[A-Za-z0-9._-]{10,}/g,               // JWT
   /\b(?:sk|pk|ghp|gho|xox[baprs])[-_][A-Za-z0-9]{8,}/g, // 常见令牌前缀
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
+  /\bAIza[A-Za-z0-9_-]{20,}\b/g,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
 ];
 

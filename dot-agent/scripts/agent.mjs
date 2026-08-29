@@ -4,8 +4,9 @@
 // 每个改状态的命令：校验输入 → 校验状态转换 → 原子更新 → 写日志 → 失败非零退出 → 机读(--json)+人读错误。
 
 import { writeFileSync, mkdirSync, existsSync, readdirSync, readFileSync, appendFileSync, copyFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { basename, join, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   paths, ensureDirs, nowIso, shortId, redact, writeJsonAtomic, byteSize, listTaskIds, readJson,
 } from './lib/store.mjs';
@@ -31,6 +32,18 @@ import { installBoardHook, installPrecommitHook } from './lib/hook.mjs';
 import { evaluatePrecommit } from './lib/precheck.mjs';
 import { detectSkill, skillBadge } from './lib/skills.mjs';
 import { memoryStats } from './lib/stats.mjs';
+import { buildEvolutionContext } from './lib/evolver.mjs';
+import {
+  addOperationalBug,
+  assertSafeBugId,
+  bugProjectRoot,
+  classifyBugSignal,
+  loadBugLedger,
+  mergeImportedBugs,
+  updateOperationalBug,
+} from './lib/bugcapture.mjs';
+import { closeOperationalBug, importRetrospectiveMarkdown, retrospectivePaths } from './lib/retrospective.mjs';
+import { assertReportCompletionGate, runBugfixEvolution } from './lib/evolution-gate.mjs';
 
 // ---------- 参数解析 ----------
 function parseArgs(argv) {
@@ -95,6 +108,38 @@ function nextHintLine() {
   } catch { return ''; }
 }
 const withNext = (human) => `${human}${nextHintLine()}`;
+
+function evolutionForNext(next) {
+  if (!next?.phase_id) return '';
+  return buildEvolutionContext({
+    phaseId: next.phase_id,
+    action: next.action,
+    targetPath: next.target_path || '',
+    techStack: (next.skills || []).join(','),
+  });
+}
+
+function taskContext(task) {
+  let evolutionContext = '';
+  let next = null;
+  if (processExists()) {
+    const p = loadProcess();
+    const st = loadState(p);
+    const taskPhase = Object.entries(st.phase_tasks || {}).find(([, taskId]) => taskId === task.task_id)?.[0];
+    next = computeNext(p, st);
+    const phaseId = taskPhase || next.phase_id || st.current_phase || '';
+    evolutionContext = buildEvolutionContext({
+      phaseId,
+      action: next.phase_id === phaseId ? next.action : 'context',
+      targetPath: next.phase_id === phaseId ? (next.target_path || '') : '',
+      techStack: (findPhase(p, phaseId)?.skills || []).join(','),
+    });
+  }
+  const text = buildContext(task, {
+    cwd: process.cwd(), branch: gitBranch(), repoName: repoName(), evolutionContext,
+  });
+  return { text, evolutionContext, next };
+}
 
 // 看板地址行：让每个新会话/推进都直接看到「去哪查看进度」，不用再问。
 // generate=true 时顺带刷新 board.html（用于 resume：新会话第一条命令）。
@@ -173,8 +218,8 @@ commands.status = () => {
 commands.context = () => {
   const id = requireActiveId();
   const t = loadTask(id);
-  const text = buildContext(t, { cwd: process.cwd(), branch: gitBranch(), repoName: repoName() });
-  ok(text, { task_id: id, context: text });
+  const context = taskContext(t);
+  ok(context.text, { task_id: id, context: context.text, evolution_context: context.evolutionContext });
 };
 
 commands.resume = () => {
@@ -183,17 +228,23 @@ commands.resume = () => {
     const p = loadProcess();
     const st = loadState(p);
     const n = computeNext(p, st);
-    ok(`（当前无活动任务）方法论脚手架已就绪。\n下一步 → ${n.hint}` + boardLine({ generate: true }), { no_active_task: true, action: n.action, board: defaultBoardOut() });
+    const evolution = evolutionForNext(n);
+    ok(`（当前无活动任务）方法论脚手架已就绪。\n下一步 → ${n.hint}${evolution ? `\n\n${evolution}` : ''}` + boardLine({ generate: true }), {
+      no_active_task: true, action: n.action, evolution_context: evolution, board: defaultBoardOut(),
+    });
     return;
   }
   const id = requireActiveId();
   const t = loadTask(id);
   const interrupted = findInterruptedSteps(id);
-  const text = buildContext(t, { cwd: process.cwd(), branch: gitBranch(), repoName: repoName() });
+  const context = taskContext(t);
   const banner = interrupted.length
     ? `\n⚠ 恢复检查：发现 ${interrupted.length} 个已 started 未提交步骤 → ${interrupted.map((s) => s.step_id).join(', ')}\n  用 \`recover --reconcile <step> --evidence ev:..\` 或 \`recover --fail <step> --reason ..\` 处理。\n`
     : '\n✔ 恢复检查：无中断步骤。\n';
-  ok(withNext(text + banner) + boardLine({ generate: true }), { task_id: id, interrupted: interrupted.map((s) => s.step_id), board: processExists() ? defaultBoardOut() : null });
+  ok(withNext(context.text + banner) + boardLine({ generate: true }), {
+    task_id: id, interrupted: interrupted.map((s) => s.step_id), evolution_context: context.evolutionContext,
+    board: processExists() ? defaultBoardOut() : null,
+  });
 };
 
 commands['start-step'] = ({ flags }) => {
@@ -370,6 +421,13 @@ commands.block = ({ flags }) => {
 commands.complete = ({ flags }) => {
   const id = requireActiveId();
   const cur = loadTask(id);
+  let phaseId = cur.phase || '';
+  if (processExists()) {
+    const p = loadProcess();
+    const st = loadState(p);
+    phaseId = Object.entries(st.phase_tasks || {}).find(([, taskId]) => taskId === id)?.[0] || phaseId;
+  }
+  assertReportCompletionGate({ root: bugProjectRoot(), phaseId });
   const hasEvidence = taskHasVerificationEvidence(cur);
   const g = guard(cur.status, 'completed', { hasVerificationEvidence: hasEvidence });
   if (!g.ok) throw Object.assign(new Error(g.reason + '（提示：先 `verify --evidence ..` 且每条 DoD 标记 met+evidence）'), { code: 'ESTATE' });
@@ -483,6 +541,8 @@ const GITIGNORE_BLOCK = [
   '.agent/checkpoints/*',
   '.agent/process-state.json',
   '.agent/board.html',
+  '.agent/bugs.lock',
+  '.agent/retrospective/*.lock',
   '!.agent/tasks/.gitkeep',
   '!.agent/journal/.gitkeep',
   '!.agent/decisions/.gitkeep',
@@ -535,6 +595,10 @@ commands.install = () => {
       else if (names.length) done.push(`方法论引用的 ${names.length} 个 skill 均已检测到 ✓`);
     } catch { /* process.json 异常不阻塞 install */ }
   }
+  const evolver = join(dirname(paths.root()), 'harness_evolver', 'context_injector.py');
+  done.push(existsSync(evolver)
+    ? 'Harness Evolver 已安装：Bugfix 阶段会动态注入历史规则'
+    : '⚠ 未检测到 harness_evolver/，自动规则演进未启用（主 Bugfix 流程仍可运行）');
   // git hook：post-commit 刷看板 + pre-commit 流程兜底
   done.push(installBoardHook());
   done.push(installPrecommitHook());
@@ -542,7 +606,7 @@ commands.install = () => {
     ['✔ 安装完成：', ...done.map((s) => '  - ' + s), '',
       '下一步：',
       '  1) 编辑 .agent/PROJECT.md 填本项目身份/不可违反规则/真源',
-      '  2) 把「任务记忆协议」+（用脚手架层则加）「方法论脚手架协议」段贴进本项目 AGENTS.md 或 README（见 .agent/PORTING.md）',
+      '  2) 把任务记忆、方法论和 Bugfix 自动学习三段协议贴进本项目 AGENTS.md 或 README（见 .agent/PORTING.md）',
       '  3) 单任务用法：node .agent/scripts/agent.mjs init --objective "..." --dod "..."',
       '  4) 方法论脚手架用法：node .agent/scripts/agent.mjs process init && node .agent/scripts/agent.mjs next（skill 清单见 .agent/process/SKILLS.md）',
       '  5) node .agent/scripts/agent.mjs resume（会自动生成/刷新看板并打印其地址）',
@@ -590,7 +654,11 @@ commands.next = () => {
   const p = loadProcess();
   const st = loadState(p);
   const n = computeNext(p, st);
-  ok(n.hint + boardLine(), { done: n.done, phase_id: n.phase_id, action: n.action, skills: n.skills, target_path: n.target_path || null, board: defaultBoardOut() });
+  const evolution = evolutionForNext(n);
+  ok(n.hint + (evolution ? `\n\n${evolution}` : '') + boardLine(), {
+    done: n.done, phase_id: n.phase_id, action: n.action, skills: n.skills,
+    target_path: n.target_path || null, evolution_context: evolution, board: defaultBoardOut(),
+  });
 };
 
 // phase start <id>：惰性 seed 阶段 task 并切为活动任务
@@ -612,7 +680,16 @@ commands.phase = ({ positional, flags }) => {
   saveState(st);
   if (created) appendEvent(taskId, 'task_created', { taskVersion: loadTask(taskId).version, payload: { objective: loadTask(taskId).objective } });
   setActive(taskId);
-  ok(withNext(`✔ 进入阶段 ${phaseId}（task=${taskId}${created ? '，新建' : '，已存在'}），已设为活动任务`), { phase_id: phaseId, task_id: taskId, created });
+  const next = computeNext(p, st);
+  const evolution = buildEvolutionContext({
+    phaseId,
+    action: next.action,
+    targetPath: next.target_path || '',
+    techStack: (findPhase(p, phaseId)?.skills || []).join(','),
+  });
+  ok(withNext(`✔ 进入阶段 ${phaseId}（task=${taskId}${created ? '，新建' : '，已存在'}），已设为活动任务`) + (evolution ? `\n\n${evolution}` : ''), {
+    phase_id: phaseId, task_id: taskId, created, evolution_context: evolution,
+  });
 };
 
 // artifact add / list
@@ -731,12 +808,24 @@ commands.doctor = () => {
   let problems = 0;
   for (const id of listTaskIds()) { try { assertValidTask(loadTask(id)); } catch { problems++; } }
   const m = memoryStats();
+  let bugs = [];
+  let bugError = '';
+  try { bugs = loadBugLedger(bugProjectRoot()); } catch (e) { bugError = e.message; }
+  const openBugs = bugs.filter((bug) => bug.in_scope && !['已归档', '延后'].includes(bug.verification_status));
+  const evolutionFile = retrospectivePaths(bugProjectRoot()).evolution;
+  let evolutionPending = false;
+  if (existsSync(evolutionFile)) {
+    try { evolutionPending = readJson(evolutionFile).pending === true; } catch { evolutionPending = true; }
+  }
   const L = [];
   L.push('🩺 记忆自检');
   L.push(`装配：运行时目录${dirOk ? '✓' : '✗'}  schemas${schemasOk ? '✓' : '✗'}  PROJECT.md${projectOk ? '✓' : '✗'}  process.json${procOn ? '✓' : '（未启用脚手架层）'}`);
   L.push(`合法：${problems === 0 ? '✓ 状态文件全部合法' : `✗ ${problems} 个任务快照不合法（跑 validate 看详情）`}`);
   L.push(`任务：${m.taskCount} 个    中断步骤：${m.interruptedCount}`);
   L.push(`记忆活动：journal 共 ${m.eventCount} 事件；最后写入 ${m.lastAt ? `${m.lastAt}（${relTime(m.lastAt)}）` : '（无）'}`);
+  L.push(bugError
+    ? `Bug 学习闭环：✗ 台账非法（${bugError}）`
+    : `Bug 学习闭环：共 ${bugs.length} 条；未归档 ${openBugs.length} 条；Evolver ${evolutionPending ? '✗ pending' : '✓ 无待处理失败'}`);
   if (m.recent.length) {
     L.push('最近调用（谁在什么时候记了啥）：');
     for (const e of m.recent) L.push(`  #${e.seq} ${e.timestamp.slice(11, 19)} ${e.event}${e.step_id ? ` ${e.step_id}` : ''} @${e.task_id}${e.summary ? ` — ${e.summary}` : ''}`);
@@ -744,7 +833,11 @@ commands.doctor = () => {
   L.push(m.invoked
     ? '判断：✅ 记忆在被调用（journal 有事件在累积）。'
     : '判断：⚠️ 机制已装好，但 journal 还是空的 —— 说明还没有人/AI 真正调用记忆（走 start-step / commit-step / artifact add 才会记）。');
-  ok(L.join('\n'), { assembled: dirOk && schemasOk && projectOk, legal: problems === 0, process_enabled: procOn, ...m });
+  ok(L.join('\n'), {
+    assembled: dirOk && schemasOk && projectOk, legal: problems === 0 && !bugError, process_enabled: procOn,
+    bug_count: bugs.length, open_bug_count: openBugs.length, bug_error: bugError, evolution_pending: evolutionPending,
+    ...m,
+  });
 };
 
 // ---------- Bug 修复专属命令 ----------
@@ -764,6 +857,7 @@ commands['repo-map'] = ({ flags }) => {
 commands['impact-check'] = ({ flags }) => {
   const bugId = flags.bug ? String(flags.bug) : '';
   if (!bugId) throw Object.assign(new Error('用法：impact-check --bug <id> [--base <ref>] [--root <目标库>]'), { code: 'EINPUT' });
+  assertSafeBugId(bugId);
   const base = flags.base ? String(flags.base) : 'HEAD';
   const root = flags.root ? String(flags.root) : process.cwd();
   const diffText = git(['diff', base]);
@@ -785,14 +879,97 @@ commands['impact-check'] = ({ flags }) => {
 
 // bug import：Excel/Word/CSV/JSON → .agent/bugs.json
 commands.bug = ({ positional, flags }) => {
-  if (positional[0] !== 'import') throw Object.assign(new Error('用法：bug import --file <bugs.xlsx|docx|csv|json>'), { code: 'EINPUT' });
-  const file = flags.file ? String(flags.file) : positional[1];
-  if (!file) throw Object.assign(new Error('用法：bug import --file <路径>'), { code: 'EINPUT' });
-  const { bugs, warnings } = importBugs(file);
-  const out = join(paths.root(), 'bugs.json');
-  writeJsonAtomic(out, bugs);
-  const warn = warnings.length ? `\n  ⚠ ${warnings.join('；')}` : '';
-  ok(withNext(`✔ 录入 ${bugs.length} 条 bug → ${out}${warn}`), { out, count: bugs.length, warnings });
+  const action = positional[0] || 'list';
+  const root = bugProjectRoot();
+  if (action === 'detect') {
+    const input = flags.text ? String(flags.text) : positional.slice(1).join(' ');
+    if (!input) throw Object.assign(new Error('用法：bug detect --text "用户消息"'), { code: 'EINPUT' });
+    const result = classifyBugSignal(input);
+    ok(result.capture ? `检测到具体 Bug 信号：${result.keywords.join(', ')}` : `未自动登记：${result.reason}`, result);
+    return;
+  }
+  if (action === 'add') {
+    const source = flags.source ? String(flags.source) : '';
+    const title = flags.title ? String(flags.title) : '';
+    if (!source || !title) throw Object.assign(new Error('用法：bug add --source user|engineering --title .. [--actual ..] [--evidence ..]*'), { code: 'EINPUT' });
+    const activeTaskId = loadActive().active_task_id || '';
+    let phaseId = '';
+    if (processExists() && activeTaskId) {
+      const p = loadProcess();
+      const st = loadState(p);
+      phaseId = Object.entries(st.phase_tasks || {}).find(([, taskId]) => taskId === activeTaskId)?.[0] || '';
+    }
+    const result = addOperationalBug({
+      root, source, title,
+      actual: flags.actual ? String(flags.actual) : title,
+      repro: flags.repro ? String(flags.repro) : '',
+      expected: flags.expected ? String(flags.expected) : '',
+      evidence: asArray(flags.evidence).map(String), phaseId, taskId: activeTaskId,
+    });
+    ok(result.duplicate
+      ? (result.reopened ? `↻ 历史 Bug 已复发并重新打开：${result.bug.id}` : `↺ 重复 Bug 已抑制：${result.bug.id}`)
+      : `✔ 已记入 Bug：${result.bug.id} ${result.bug.title}`,
+    { bug: result.bug, duplicate: result.duplicate, reopened: result.reopened });
+    return;
+  }
+  if (action === 'import') {
+    const file = flags.file ? String(flags.file) : positional[1];
+    if (!file) throw Object.assign(new Error('用法：bug import --file <路径>'), { code: 'EINPUT' });
+    const { bugs, warnings } = importBugs(file);
+    const sourcePathHash = createHash('sha256').update(resolve(file)).digest('hex').slice(0, 12);
+    const sourceId = flags.source ? String(flags.source) : `${basename(file)}:${sourcePathHash}`;
+    const merged = mergeImportedBugs(root, bugs.map((bug, index) => ({
+      ...bug,
+      source: bug.source || 'import',
+      source_key: bug.source_key || `${sourceId}#${bug.id || `row-${index + 1}`}`,
+    })));
+    const out = join(paths.root(), 'bugs.json');
+    const warn = warnings.length ? `\n  ⚠ ${warnings.join('；')}` : '';
+    ok(withNext(`✔ 导入 ${bugs.length} 条、合并后共 ${merged.length} 条 Bug → ${out}${warn}`), { out, imported: bugs.length, count: merged.length, warnings });
+    return;
+  }
+  if (action === 'retrospective-import') {
+    const file = flags.file ? String(flags.file) : positional[1];
+    if (!file) throw Object.assign(new Error('用法：bug retrospective-import --file docs/retrospective/项目复盘待办.md'), { code: 'EINPUT' });
+    const result = importRetrospectiveMarkdown({ root, file });
+    ok(`✔ 已导入 ${result.imported} 条历史闭环记录；原文备份：${result.backupPath}`, result);
+    return;
+  }
+  if (action === 'update') {
+    const id = positional[1] || flags.id;
+    if (!id) throw Object.assign(new Error('用法：bug update <id> [--verification-status ..] [--evidence ..]*'), { code: 'EINPUT' });
+    const bug = updateOperationalBug({
+      root, id: String(id),
+      verificationStatus: flags['verification-status'] !== undefined ? String(flags['verification-status']) : undefined,
+      evidence: flags.evidence !== undefined ? asArray(flags.evidence).map(String) : undefined,
+    });
+    ok(`✔ Bug 已更新：${bug.id} → ${bug.verification_status}`, { bug });
+    return;
+  }
+  if (action === 'close') {
+    const id = positional[1] || flags.id;
+    if (!id) throw Object.assign(new Error('用法：bug close <id> [--status 已归档|延后] [--resolution ..]'), { code: 'EINPUT' });
+    const closed = closeOperationalBug({
+      root, id: String(id), status: String(flags.status || '已归档'), resolution: flags.resolution ? String(flags.resolution) : '',
+    });
+    const evolution = runBugfixEvolution({ root, reason: `bug-close:${closed.bug.id}` });
+    ok(`✔ Bug 已归档并完成规则差异：${closed.bug.id}${evolution.skipped ? '（内容未变化）' : ''}`,
+      { bug: closed.bug, retrospective: closed.record, evolution: evolution.state, skipped: evolution.skipped });
+    return;
+  }
+  if (action === 'evolve') {
+    const evolution = runBugfixEvolution({ root, reason: 'explicit-keyword', force: flags.force === true });
+    ok(evolution.skipped ? `↺ 规则差异未变化：${evolution.reason}` : `✔ 规则差异报告：${evolution.state.report_path}`,
+      { skipped: evolution.skipped, reason: evolution.reason, evolution: evolution.state });
+    return;
+  }
+  if (action === 'list') {
+    const items = loadBugLedger(root);
+    const lines = items.map((bug) => `${bug.id}  源=${bug.source_status}  验证=${bug.verification_status}  ${bug.title}`);
+    ok(lines.join('\n') || '（Bug 台账为空）', { items });
+    return;
+  }
+  throw Object.assign(new Error('用法：bug detect|add|import|retrospective-import|update|close|evolve|list'), { code: 'EINPUT' });
 };
 
 // report：bugs.json + 证据 → .agent/reports/index.html
@@ -837,8 +1014,9 @@ commands.help = () => {
     'Bug 修复专属：',
     '  repo-map [--root <目标代码库>]                       （扫页面/路由/依赖/云函数骨架 → .agent/arch-map.md）',
     '  impact-check --bug <id> [--base <ref>] [--root ..]   （改后 diff 对账：实际改动×反向调用方 vs 04/05 预测 → .agent/bugs/<id>/impact-check.md）',
-    '  bug import --file <bugs.xlsx|docx|csv|json>          （录入台账 → .agent/bugs.json）',
+    '  bug detect|add|import|update|close|evolve|list       （工作队列 + 验证归档 + 规则演进）',
     '  report [--out ..] [--open]                          （台账+证据 → .agent/reports/index.html）',
+    '  next/context/resume/phase start 按 Bugfix 阶段动态注入历史规则',
     '  全命令支持 --json（机读输出）',
   ].join('\n'));
 };

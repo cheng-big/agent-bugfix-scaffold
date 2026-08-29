@@ -1,6 +1,7 @@
 // report：读 bugs.json + 各 bug 目录的阶段产物与证据截图 → 自包含 HTML 报告。
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { loadBugLedger } from './bugcapture.mjs';
 
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const readMd = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '');
@@ -71,8 +72,7 @@ function bugCard(agentRoot, bug) {
 export function buildBugReport(agentRoot) {
   const bugsPath = join(agentRoot, 'bugs.json');
   if (!existsSync(bugsPath)) throw Object.assign(new Error('缺 .agent/bugs.json（先跑 `bug import`）'), { code: 'ENOBUGS' });
-  const j = JSON.parse(readFileSync(bugsPath, 'utf8'));
-  const bugs = Array.isArray(j) ? j : (j.bugs || []);
+  const bugs = loadBugLedger(dirname(agentRoot));
 
   const total = bugs.length;
   const pendingFix = bugs.filter((b) => (b.status || b.raw?.['状态']) === '待修复').length;
@@ -391,4 +391,3 @@ export function buildBugReport(agentRoot) {
 </body>
 </html>`;
 }
-

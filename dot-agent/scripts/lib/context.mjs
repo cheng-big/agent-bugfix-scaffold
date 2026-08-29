@@ -38,8 +38,14 @@ function evtSummary(e) {
   return bits.join(' · ');
 }
 
+function feedbackProtocolLines() {
+  const file = join(agentRoot(), 'FEEDBACK-PROTOCOL.md');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split('\n').filter((line) => line.trim()).slice(0, 14).map((line) => line.slice(0, 240));
+}
+
 // 生成有界启动上下文（字符串）。不含整份日志。
-export function buildContext(task, { cwd = process.cwd(), branch = '', repoName = '' } = {}) {
+export function buildContext(task, { cwd = process.cwd(), branch = '', repoName = '', evolutionContext = '' } = {}) {
   const events = readEvents(task.task_id);
   const interrupted = findInterruptedSteps(task.task_id);
   const recentDone = (task.recent_completed || []).slice(-RECENT_COMPLETED_SHOW);
@@ -49,6 +55,11 @@ export function buildContext(task, { cwd = process.cwd(), branch = '', repoName 
   L.push('你是谁：');
   for (const l of identityLines(cwd)) L.push('  ' + l);
   L.push('  唯一操作人身份从会话上下文取；不凭聊天摘要宣布完成。');
+  const feedbackProtocol = feedbackProtocolLines();
+  if (feedbackProtocol.length) {
+    L.push('  [Bugfix 自动学习协议]');
+    for (const line of feedbackProtocol) L.push('  ' + line);
+  }
   L.push('');
 
   L.push('你在哪里：');
@@ -90,6 +101,11 @@ export function buildContext(task, { cwd = process.cwd(), branch = '', repoName 
   for (const c of task.critical_constraints || []) L.push(`  - ${c}`);
   if (task.references?.length) L.push('  相关引用：' + task.references.join(' , '));
   L.push('');
+
+  if (evolutionContext) {
+    L.push(evolutionContext);
+    L.push('');
+  }
 
   L.push('执行要求：');
   L.push('  先验证真实态再继续；无证据不得宣布完成；每步 start→work→verify→commit；');

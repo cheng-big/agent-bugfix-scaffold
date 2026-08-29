@@ -1,3 +1,7 @@
 .DS_Store
 node_modules/
 *.log
+__pycache__/
+*.py[cod]
+dot-agent/bugs.lock
+dot-agent/retrospective/

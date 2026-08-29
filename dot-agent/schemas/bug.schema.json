@@ -17,6 +17,13 @@
     "platform": { "type": "string", "description": "涉及端（web/小程序/云函数），或模块/页面组合" },
     "status": { "type": "string", "description": "状态（待修复/待开发/待确认…；已验收/已完成等在录入时被过滤）" },
     "reporter": { "type": "string", "description": "提出人/报告人" },
+    "source": { "type": "string", "enum": ["user", "engineering", "import"] },
+    "source_key": { "type": "string" },
+    "source_status": { "type": "string" },
+    "verification_status": { "type": "string", "enum": ["待验证", "部分验证", "已验证待归档", "已归档", "延后"] },
+    "in_scope": { "type": "boolean" },
+    "fingerprint": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
     "raw": { "type": "object", "description": "原始列全量留存，AI 再补" }
   }
 }

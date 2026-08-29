@@ -101,9 +101,11 @@
 ```bash
 # 1. 把脚手架装进目标项目（脚手架建好后）
 cp -r agent-bugfix-scaffold/dot-agent <目标项目>/.agent
+cp -r agent-bugfix-scaffold/harness_evolver <目标项目>/harness_evolver
 cd <目标项目>
 node .agent/scripts/agent.mjs install
-node --test .agent/scripts/*.test.mjs        # 应全绿
+node --test .agent/scripts/*.test.mjs        # 52/52
+python3 -m unittest discover -s harness_evolver/tests -v  # 7/7
 
 # 2. 配置身份与流程
 #   编辑 .agent/PROJECT.md          —— 项目身份
@@ -184,3 +186,11 @@ agent-bugfix-scaffold/
 | **agent-bugfix-scaffold（本文）** | 记忆层 + **bug 修复**方法论脚手架 + 双轨验证 + 截图报告 |
 
 三者共享同一引擎，方法论不同。
+
+---
+
+## 十、反馈驱动的自迭代
+
+Bugfix Harness 不新增第二套待修复队列：`.agent/bugs.json` 继续承载当前 Bug。会话内自动捕获只执行 `bug add`；verify 通过后，`bug close` 回读根因、影响面、改动、影响面对账和验证证据，才把已验证事实归档到 `docs/retrospective/`。
+
+归档自动调用项目根的 `harness_evolver/`，默认 `--use-llm never`。Evolver 把根因逆向映射到需求、数据库、编码或测试阶段，并在下一轮 `next/context/resume/phase start` 动态注入。report 完成门禁保证未归档 Bug、复盘不一致、演进失败或报告缺失不能被假装完成。
